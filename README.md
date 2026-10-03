@@ -66,31 +66,95 @@ creates a `user_preferences` join table (`user_id`, `channel`) for this — sati
 "preferences table" requirement with less boilerplate, while still being a real normalized
 table you can see in the H2 console.
 
-## API Reference
+## Build, Run, and Test
 
-### Create a user
+### 1. Build the project
+```bash
+mvn clean install
 ```
-POST /api/users
-{ "name": "Anjali", "email": "anjali@test.com", "phoneNumber": "9999999999",
-  "deviceToken": "device-abc", "optedInChannels": ["EMAIL", "IN_APP"] }
-```
+This downloads dependencies, compiles the code, and runs the test suite. A successful
+build ends with `BUILD SUCCESS`.
 
-### Update a user's preferences
+### 2. Run the application
+```bash
+mvn spring-boot:run
 ```
-PUT /api/users/1/preferences
-["EMAIL", "SMS"]
-```
+Wait for the console to show `Started NotificationHubApplication in X seconds` and
+`Tomcat started on port(s): 8080`. The app is now live at `http://localhost:8080`.
+Three demo users (ids `1`, `2`, `3`) are seeded automatically on startup — see
+`DataSeeder.java` for their exact preferences.
 
-### Send a notification (the unified endpoint)
+### 3. Test the endpoints
+
+You can test every endpoint with **either cURL** (copy-paste into any terminal) **or Postman**
+(copy the same details into a new request). Both are shown below for each endpoint.
+
+---
+
+**a) Get a user's profile** (confirms the demo data seeded correctly)
+
+cURL:
+```bash
+curl http://localhost:8080/api/users/1
 ```
-POST /api/notifications
-{ "userId": 1, "title": "Loan Approved", "body": "Your loan has been approved.",
-  "channels": ["EMAIL", "SMS", "PUSH", "IN_APP"] }
+Postman: `GET` request to `http://localhost:8080/api/users/1`, no body needed.
+
+---
+
+**b) Create a new user**
+
+cURL:
+```bash
+curl -X POST http://localhost:8080/api/users \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Anjali","email":"anjali@test.com","phoneNumber":"9999999999","deviceToken":"device-abc","optedInChannels":["EMAIL","IN_APP"]}'
 ```
-Response shows per-channel outcome, e.g.:
+Postman: `POST` to `http://localhost:8080/api/users` → Body tab → raw → JSON → paste:
 ```json
 {
-  "userId": 1,
+  "name": "Anjali",
+  "email": "anjali@test.com",
+  "phoneNumber": "9999999999",
+  "deviceToken": "device-abc",
+  "optedInChannels": ["EMAIL", "IN_APP"]
+}
+```
+
+---
+
+**c) Update a user's channel preferences**
+
+cURL:
+```bash
+curl -X PUT http://localhost:8080/api/users/1/preferences \
+  -H "Content-Type: application/json" \
+  -d '["EMAIL","SMS"]'
+```
+Postman: `PUT` to `http://localhost:8080/api/users/1/preferences` → Body → raw → JSON → `["EMAIL","SMS"]`
+
+---
+
+**d) Send a notification (the unified endpoint — this is the core feature)**
+
+cURL:
+```bash
+curl -X POST http://localhost:8080/api/notifications \
+  -H "Content-Type: application/json" \
+  -d '{"userId":2,"title":"Order Delivered","body":"Your order has been delivered.","channels":["EMAIL","SMS","PUSH","IN_APP"]}'
+```
+Postman: `POST` to `http://localhost:8080/api/notifications` → Body → raw → JSON:
+```json
+{
+  "userId": 2,
+  "title": "Order Delivered",
+  "body": "Your order has been delivered.",
+  "channels": ["EMAIL", "SMS", "PUSH", "IN_APP"]
+}
+```
+Expected response (user 2 — Priya — has NOT opted into SMS, so it's SKIPPED even though requested):
+```json
+{
+  "userId": 2,
   "results": [
     { "channel": "EMAIL", "status": "SUCCESS", "detail": null },
     { "channel": "SMS", "status": "SKIPPED", "detail": "User has not opted into this channel" },
@@ -99,11 +163,51 @@ Response shows per-channel outcome, e.g.:
   ]
 }
 ```
+Also check the terminal running the app — you'll see `[EMAIL] To: ...`, `[PUSH] Device: ...` etc.
+printed by the mock channel senders.
 
-### View notification history for a user
+---
+
+**e) View notification history for a user (the audit trail)**
+
+cURL:
+```bash
+curl http://localhost:8080/api/notifications/history/2
 ```
-GET /api/notifications/history/1
+Postman: `GET` request to `http://localhost:8080/api/notifications/history/2`
+
+---
+
+**f) Test a validation failure** (missing required field → should return `400 Bad Request`)
+
+cURL:
+```bash
+curl -X POST http://localhost:8080/api/notifications \
+  -H "Content-Type: application/json" \
+  -d '{"title":"Missing userId and channels"}'
 ```
+
+---
+
+**g) Test a not-found case** (non-existent user → should return `404 Not Found`)
+
+cURL:
+```bash
+curl http://localhost:8080/api/users/999
+```
+
+### 4. Run the automated test suite
+```bash
+mvn test
+```
+This runs `NotificationDispatcherServiceTest` (5 scenarios covering routing, preference
+skipping, and failure handling) and `NotificationControllerValidationTest` (validation).
+A successful run shows `Tests run: 6, Failures: 0, Errors: 0`.
+
+### 5. (Optional) Inspect the database directly
+Visit `http://localhost:8080/h2-console` while the app is running.
+JDBC URL: `jdbc:h2:mem:notificationdb`, user: `sa`, password: *(blank)*.
+Run `SELECT * FROM NOTIFICATION_LOGS;` to see every dispatch attempt logged.
 
 ## Class Diagram
 
